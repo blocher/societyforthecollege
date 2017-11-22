@@ -1,0 +1,16 @@
+# General
+db/*.sql
+.DS_Store
+
+# Vagrant
+.vagrant*
+
+# Grunt/SASS/Node
+.sass-cache
+.grunt
+node_modules
+.lock-wscript
+
+# Composer
+
+public/log.txt

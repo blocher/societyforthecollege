@@ -19,8 +19,6 @@ if ( ! class_exists( 'GF_Background_Process' ) ) {
  */
 class GF_Feed_Processor extends GF_Background_Process {
 
-	use ProcessLogger;
-
 	/**
 	 * Contains an instance of this class, if available.
 	 *
@@ -119,7 +117,6 @@ class GF_Feed_Processor extends GF_Background_Process {
 	 * @return void
 	 */
 	protected function schedule_event() {
-		$this->log( $this->cron_hook_identifier );
 		if ( ! wp_next_scheduled( $this->cron_hook_identifier ) ) {
 			wp_schedule_event( time() + 10, $this->cron_interval_identifier, $this->cron_hook_identifier );
 		}

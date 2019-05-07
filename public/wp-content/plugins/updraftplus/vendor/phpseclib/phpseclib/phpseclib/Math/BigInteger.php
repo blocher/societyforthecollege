@@ -65,7 +65,6 @@
  * @author    Jim Wigginton <terrafrost@php.net>
  * @copyright 2006 Jim Wigginton
  * @license   http://www.opensource.org/licenses/mit-license.html  MIT License
- * @link      http://pear.php.net/package/Math_BigInteger
  */
 
 /**#@+
@@ -550,7 +549,7 @@ class Math_BigInteger
             $temp = $comparison < 0 ? $this->add(new Math_BigInteger(1)) : $this->copy();
             $bytes = $temp->toBytes();
 
-            if (empty($bytes)) { // eg. if the number we're trying to convert is -1
+            if (!strlen($bytes)) { // eg. if the number we're trying to convert is -1
                 $bytes = chr(0);
             }
 
@@ -2905,7 +2904,7 @@ class Math_BigInteger
         switch (MATH_BIGINTEGER_MODE) {
             case MATH_BIGINTEGER_MODE_GMP:
                 $temp = new Math_BigInteger();
-                $temp->value = gmp_xor($this->value, $x->value);
+                $temp->value = gmp_xor(gmp_abs($this->value), gmp_abs($x->value));
 
                 return $this->_normalize($temp);
             case MATH_BIGINTEGER_MODE_BCMATH:
@@ -2922,6 +2921,7 @@ class Math_BigInteger
 
         $length = max(count($this->value), count($x->value));
         $result = $this->copy();
+        $result->is_negative = false;
         $result->value = array_pad($result->value, $length, 0);
         $x->value = array_pad($x->value, $length, 0);
 

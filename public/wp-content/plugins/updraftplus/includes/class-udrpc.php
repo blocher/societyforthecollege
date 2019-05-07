@@ -59,7 +59,7 @@ if (!class_exists('UpdraftPlus_Remote_Communications')) :
 class UpdraftPlus_Remote_Communications {
 
 	// Version numbers relate to versions of this PHP library only (i.e. it's not a protocol support number, and version numbers of other compatible libraries (e.g. JavaScript) are not comparable)
-	public $version = '1.4.14';
+	public $version = '1.4.18';
 
 	private $key_name_indicator;
 
@@ -106,7 +106,7 @@ class UpdraftPlus_Remote_Communications {
 	
 	private $require_message_to_be_understood = false;
 
-	public function __construct($key_name_indicator = 'default', $can_generate = false) {
+	public function __construct($key_name_indicator = 'default') {
 		$this->set_key_name_indicator($key_name_indicator);
 	}
 
@@ -172,7 +172,8 @@ class UpdraftPlus_Remote_Communications {
 			// phpseclib 1.x uses deprecated PHP4-style constructors
 			$this->no_deprecation_warnings_on_php7();
 			if (is_a($updraftplus, 'UpdraftPlus')) {
-				$updraftplus->ensure_phpseclib(array('Crypt_Rijndael', 'Crypt_RSA', 'Crypt_Hash'), array('Crypt/Rijndael', 'Crypt/RSA', 'Crypt/Hash'));
+				$ensure_phpseclib = $updraftplus->ensure_phpseclib(array('Crypt_Rijndael', 'Crypt_RSA', 'Crypt_Hash'), array('Crypt/Rijndael', 'Crypt/RSA', 'Crypt/Hash'));
+				if (is_wp_error($ensure_phpseclib)) return $ensure_phpseclib;
 			} elseif (defined('UPDRAFTPLUS_DIR') && file_exists(UPDRAFTPLUS_DIR.'/vendor/phpseclib/phpseclib/phpseclib')) {
 				$pdir = UPDRAFTPLUS_DIR.'/vendor/phpseclib/phpseclib/phpseclib';
 				if (false === strpos(get_include_path(), $pdir)) set_include_path($pdir.PATH_SEPARATOR.get_include_path());
@@ -195,6 +196,7 @@ class UpdraftPlus_Remote_Communications {
 	private function no_deprecation_warnings_on_php7() {
 		// PHP_MAJOR_VERSION is defined in PHP 5.2.7+
 		// We don't test for PHP > 7 because the specific deprecated element will be removed in PHP 8 - and so no warning should come anyway (and we shouldn't suppress other stuff until we know we need to).
+		// @codingStandardsIgnoreLine
 		if (defined('PHP_MAJOR_VERSION') && PHP_MAJOR_VERSION == 7) {
 			$old_level = error_reporting();
 			// @codingStandardsIgnoreLine
@@ -218,7 +220,7 @@ class UpdraftPlus_Remote_Communications {
 	/**
 	 * Method to get the remote key
 	 *
-	 * @return array
+	 * @return string
 	 */
 	public function get_key_remote() {
 		if (empty($this->key_remote) && $this->can_generate) {
@@ -247,9 +249,18 @@ class UpdraftPlus_Remote_Communications {
 	}
 
 	/**
+	 * Used for sending - when receiving, the format is part of the message
+	 *
+	 * @return integer
+	 */
+	public function get_message_format() {
+		return $this->format;
+	}
+	
+	/**
 	 * Method to get the local key
 	 *
-	 * @return array
+	 * @return string
 	 */
 	public function get_key_local() {
 		if (empty($this->key_local)) {
@@ -308,6 +319,7 @@ class UpdraftPlus_Remote_Communications {
 			'url' => trailingslashit(network_site_url()),
 			'admin_url' => trailingslashit(admin_url()),
 			'network_admin_url' => trailingslashit(network_admin_url()),
+			'format_support' => 2,
 		));
 
 		if ('base64_with_count' == $format) {
@@ -644,6 +656,7 @@ class UpdraftPlus_Remote_Communications {
 			} else {
 				$verify = true;
 			}
+			
 			$guzzle_options['verify'] = apply_filters('udrpc_guzzle_verify', $verify);
 
 			if (!empty($http_credentials['username'])) {
@@ -709,6 +722,9 @@ class UpdraftPlus_Remote_Communications {
 
 		$post_options = apply_filters('udrpc_post_options', $post_options, $command, $data, $timeout, $this);
 
+		// Make the memory available - may be useful if the message was large
+		unset($data);
+		
 		try {
 			$post = $this->http_post($post_options);
 		} catch (Exception $e) {
@@ -858,9 +874,7 @@ class UpdraftPlus_Remote_Communications {
 
 		/*
 		In format 1 (legacy/obsolete), the one encrypts (the shared AES key) using one half of the key-pair, and decrypts with the other; whereas the other side of the conversation does the reverse when replying (and uses a different shared AES key). Though this is possible in RSA, this is the wrong thing to do - see https://crypto.stackexchange.com/questions/2123/rsa-encryption-with-private-key-and-decryption-with-a-public-key
-		
 		In format 2, both sides have their own private and public key. The sender encrypts using the other side's public key, and decrypts using its own private key. Messages are signed (the message digest is SHA-256).
-		
 		*/
 
 		// Is this for us?
@@ -930,7 +944,7 @@ class UpdraftPlus_Remote_Communications {
 		}
 
 		// Do this after the extra replay protection, as that checks hashes within the maximum time window - so don't check the maximum time window until afterwards, to avoid a tiny window (race) in between.
-		$time_difference = absint(($udrpc_message['time'] - time()));
+		$time_difference = absint($udrpc_message['time'] - time());
 		if ($time_difference > $this->maximum_replay_time_difference) {
 			$this->log("Time in incoming message is outside of allowed window ($time_difference > ".$this->maximum_replay_time_difference.')', 'error');
 			die;
@@ -1003,7 +1017,7 @@ class UpdraftPlus_Remote_Communications {
 		$data = empty($udrpc_message['data']) ? null : $udrpc_message['data'];
 
 		// @codingStandardsIgnoreLine
-		if ($http_origin && !empty($udrpc_message['cors_headers_wanted']) && !@constant('UDRPC_DO_NOT_SEND_CORS_HEADERS')) {
+		if ($http_origin && !empty($udrpc_message['cors_headers_wanted']) && (!defined('UDRPC_DO_NOT_SEND_CORS_HEADERS') || !UDRPC_DO_NOT_SEND_CORS_HEADERS)) {
 			header("Access-Control-Allow-Origin: $http_origin");
 			header('Access-Control-Allow-Credentials: true');
 		}
@@ -1011,7 +1025,7 @@ class UpdraftPlus_Remote_Communications {
 		$this->log('Command received: '.$command, 'info');
 
 		if ('ping' == $command) {
-			echo json_encode($this->create_message('pong', null, true));
+			$response = array('response' => 'pong', 'data' => null);
 		} else {
 			if (has_filter('udrpc_command_'.$command)) {
 				$command_action_hooked = true;
@@ -1019,19 +1033,18 @@ class UpdraftPlus_Remote_Communications {
 			} else {
 				$response = array('response' => 'rpcerror', 'data' => array('code' => 'unknown_rpc_command', 'data' => $command));
 			}
+		}
 
-			$response = apply_filters('udrpc_action', $response, $command, $data, $this->key_name_indicator, $this);
+		$response = apply_filters('udrpc_action', $response, $command, $data, $this->key_name_indicator, $this);
 
-			if (is_array($response)) {
+		if (is_array($response)) {
 
-				if ($this->debug) {
-					$this->log('UDRPC response (pre-encoding/encryption): '.serialize($response));
-				}
-
-				$data = isset($response['data']) ? $response['data'] : null;
-				echo json_encode($this->create_message($response['response'], $data, true));
+			if ($this->debug) {
+				$this->log('UDRPC response (pre-encoding/encryption): '.serialize($response));
 			}
 
+			$data = isset($response['data']) ? $response['data'] : null;
+			echo json_encode($this->create_message($response['response'], $data, true));
 		}
 
 		die;

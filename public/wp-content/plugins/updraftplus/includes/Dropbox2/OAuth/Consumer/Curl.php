@@ -105,15 +105,19 @@ class Dropbox_Curl extends Dropbox_ConsumerAbstract
                   }
             }
         }
-        
-        if (isset($request['headers'])) $options[CURLOPT_HTTPHEADER] = $request['headers'];
 
         /*
             Add check to see if it's an API v2 call if so then json encode the contents. This is so that it is backwards compatible with API v1 endpoints.
          */
         if (isset($additional['api_v2']) && !empty($request['postfields'])) {
             $request['postfields'] = json_encode($request['postfields']);
+        } elseif (empty($request['postfields'])) {
+            // if the postfields are empty then we don't want to send the application/json header if it's set as Dropbox will return an error
+            $key = array_search('Content-Type: application/json', $request['headers']);
+            if (false !== $key) unset($request['headers'][$key]);
         }
+
+        if (isset($request['headers']) && !empty($request['headers'])) $options[CURLOPT_HTTPHEADER] = $request['headers'];
 
         if ($method == 'GET' && $this->outFile) { // GET
             $options[CURLOPT_RETURNTRANSFER] = false;
@@ -121,11 +125,6 @@ class Dropbox_Curl extends Dropbox_ConsumerAbstract
             $options[CURLOPT_FILE] = $this->outFile;
             $options[CURLOPT_BINARYTRANSFER] = true;
             $options[CURLOPT_FAILONERROR] = true;
-            /*
-                Not sure if this is used, keeping it here for backwards compatibility at the moment.
-                With API v2 the headers are set in the $request they are set above if they are set.
-             */
-            if (isset($additional['headers'])) $options[CURLOPT_HTTPHEADER] = $additional['headers'];
             $this->outFile = null;
         }  elseif ($method == 'POST' && $this->outFile) { // POST
             $options[CURLOPT_POST] = true;
@@ -140,7 +139,7 @@ class Dropbox_Curl extends Dropbox_ConsumerAbstract
             $options[CURLOPT_POSTFIELDS] = $this->inFile;
         } elseif ($method == 'POST') { // POST
             $options[CURLOPT_POST] = true;
-			$options[CURLOPT_POSTFIELDS] = $request['postfields'];
+            $options[CURLOPT_POSTFIELDS] = $request['postfields'];
         } elseif ($method == 'PUT' && $this->inFile) { // PUT
             $options[CURLOPT_PUT] = true;
             $options[CURLOPT_INFILE] = $this->inFile;
@@ -150,6 +149,10 @@ class Dropbox_Curl extends Dropbox_ConsumerAbstract
             $this->inFile = null;
         }
 
+        if (isset($additional['timeout'])) {
+            $options[CURLOPT_TIMEOUT] = $additional['timeout'];
+        }
+        
         // Set the cURL options at once
         curl_setopt_array($handle, $options);
         // Execute, get any error and close
@@ -223,7 +226,7 @@ class Dropbox_Curl extends Dropbox_ConsumerAbstract
                         throw new Dropbox_UnsupportedMediaTypeException($message, 415);
                     case 401:
                     	//401 means oauth token is expired continue to manually handle the exception depending on the situation
-                    	continue;
+                    	break;
                     case 409:
                         //409 in API V2 every error will return with a 409 to find out what the error is the error description should be checked.                      
                         throw new Dropbox_Exception($message, $code);
@@ -251,14 +254,14 @@ class Dropbox_Curl extends Dropbox_ConsumerAbstract
         
         // If the status code is 100, the API server must send a final response
         // We need to explode the response again to get the actual response
-        if (preg_match('#^HTTP/1.1 100#i', $lines[0])) {
+        if (preg_match('#^HTTP/[\.\d]+ 100#i', $lines[0])) {
             list($headers, $response) = explode("\r\n\r\n", $response, 2);
             $lines = explode("\r\n", $headers);
         }
         
         // Get the HTTP response code from the first line
         $first = array_shift($lines);
-        $pattern = '#^HTTP/1.1 ([0-9]{3})#i';
+        $pattern = '#^HTTP/[\.\d]+ ([0-9]{3})#i';
         preg_match($pattern, $first, $matches);
         $code = $matches[1];
         
@@ -277,7 +280,7 @@ class Dropbox_Curl extends Dropbox_ConsumerAbstract
 
          if (is_string($body)) {
              $body_lines = explode("\r\n", $body);
-             if (preg_match('#^HTTP/1.1 100#i', $body_lines[0]) && preg_match('#^HTTP/1.#i', $body_lines[2])) {
+             if (preg_match('#^HTTP/[\.\d]+ 100#i', $body_lines[0]) && preg_match('#^HTTP/\d#i', $body_lines[2])) {
              return $this->parse($body);
              }
          }
